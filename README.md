@@ -43,20 +43,40 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
-Create a project config by copying `configs/example_project.yaml`, then update
-the manifest path, image columns, ROI mask columns, and preprocessing settings.
+Create a project config automatically from your manifest:
+
+```bash
+python -m radiomics_framework.generate_config \
+  --manifest examples/manifest_example.csv \
+  --output configs/project.yaml \
+  --label-column label
+```
+
+You can also use the installed CLI:
+
+```bash
+radiomics-framework init-config \
+  --manifest examples/manifest_example.csv \
+  --output configs/project.yaml \
+  --label-column label
+```
+
+Review the generated YAML before running extraction. If the automatic inference
+does not detect the right columns, pass them explicitly with `--image-column`,
+`--mask-column`, `--sample-id-column`, `--group-id-column`, and
+`--label-column`.
 
 Extract features:
 
 ```bash
-python -m radiomics_framework.extract --config configs/example_project.yaml
+python -m radiomics_framework.extract --config configs/project.yaml
 ```
 
 Concatenate extracted tables:
 
 ```bash
 python -m radiomics_framework.concatenate \
-  --config configs/example_project.yaml \
+  --config configs/project.yaml \
   --output artifacts/radiomics/concatenated/features_all.csv
 ```
 
@@ -64,7 +84,7 @@ Train and evaluate models:
 
 ```bash
 python -m radiomics_framework.train \
-  --config configs/example_project.yaml \
+  --config configs/project.yaml \
   --features artifacts/radiomics/concatenated/features_all.csv \
   --output_dir results/radiomics_framework \
   --feature_strategy most_discriminant \
@@ -107,6 +127,35 @@ rois:
 ```
 
 Use `mode: full` for whole-image extraction without a mask.
+
+## Automatic YAML generation
+
+The command below reads the manifest header and a small preview of rows, then
+infers image columns, mask columns, the label column, and the grouping column:
+
+```bash
+python -m radiomics_framework.generate_config \
+  --manifest /path/to/manifest.csv \
+  --output configs/project.yaml
+```
+
+Common names such as `sample_id`, `patient_id`, `label`, `image_path`,
+`ct_path`, `t2_path`, `mask_path`, `segmentation_path`, or `roi_path` are
+detected automatically. For ambiguous datasets, use explicit overrides:
+
+```bash
+python -m radiomics_framework.generate_config \
+  --manifest /path/to/manifest.csv \
+  --output configs/project.yaml \
+  --project-name my_project \
+  --sample-id-column sample_id \
+  --group-id-column patient_id \
+  --label-column outcome \
+  --image-column ct_path \
+  --image-column pet_path \
+  --mask-column tumor_mask_path \
+  --include-full-roi
+```
 
 ## Methodological safeguards
 

@@ -17,7 +17,32 @@ See `docs/manifest_schema.md` for examples.
 
 ## 2. Configure the project
 
-Copy `configs/example_project.yaml` and edit:
+Generate a first YAML automatically from your manifest:
+
+```bash
+python -m radiomics_framework.generate_config \
+  --manifest examples/manifest_example.csv \
+  --output configs/project.yaml \
+  --label-column label
+```
+
+For ambiguous datasets, provide explicit column names:
+
+```bash
+python -m radiomics_framework.generate_config \
+  --manifest /path/to/manifest.csv \
+  --output configs/project.yaml \
+  --project-name my_project \
+  --sample-id-column sample_id \
+  --group-id-column patient_id \
+  --label-column outcome \
+  --image-column ct_path \
+  --image-column pet_path \
+  --mask-column tumor_mask_path \
+  --include-full-roi
+```
+
+Then review the generated YAML. The fields you may edit manually are:
 
 - `project.root`
 - `project.manifest`
@@ -33,7 +58,7 @@ and feature prefixes.
 ## 3. Extract radiomics features
 
 ```bash
-python -m radiomics_framework.extract --config configs/example_project.yaml
+python -m radiomics_framework.extract --config configs/project.yaml
 ```
 
 This writes one CSV per modality and ROI:
@@ -46,7 +71,7 @@ artifacts/radiomics/features_<modality>_<roi>.csv
 
 ```bash
 python -m radiomics_framework.concatenate \
-  --config configs/example_project.yaml \
+  --config configs/project.yaml \
   --output artifacts/radiomics/concatenated/features_all.csv
 ```
 
@@ -61,7 +86,7 @@ The concatenation step:
 
 ```bash
 python -m radiomics_framework.train \
-  --config configs/example_project.yaml \
+  --config configs/project.yaml \
   --features artifacts/radiomics/concatenated/features_all.csv \
   --output_dir results/radiomics_framework \
   --feature_strategy most_discriminant \

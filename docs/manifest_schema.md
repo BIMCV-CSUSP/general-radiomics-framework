@@ -59,3 +59,26 @@ case_002,p002,1,data/ct/case_002.nii.gz,data/pet/case_002.nii.gz,data/masks/case
 
 Any format readable by SimpleITK can be used, including NIfTI, NRRD, MHA/MHD,
 DICOM series converted to a volume, and many standard medical-image formats.
+
+## Generate the YAML automatically
+
+Once the manifest exists, generate a first configuration with:
+
+```bash
+python -m radiomics_framework.generate_config \
+  --manifest /path/to/manifest.csv \
+  --output configs/project.yaml
+```
+
+The generator detects common column names and path-like values. If a dataset has
+ambiguous names, pass columns explicitly:
+
+```bash
+python -m radiomics_framework.generate_config \
+  --manifest /path/to/manifest.csv \
+  --output configs/project.yaml \
+  --label-column outcome \
+  --group-id-column patient_id \
+  --image-column ct_path \
+  --mask-column lesion_mask_path
+```

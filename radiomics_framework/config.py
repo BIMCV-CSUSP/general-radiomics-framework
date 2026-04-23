@@ -12,7 +12,7 @@ class ColumnsConfig:
     """Column names used by the project manifest and modeling table."""
 
     sample_id: str = "sample_id"
-    label: str = "label"
+    label: str | None = "label"
     group_id: str | None = "patient_id"
 
 

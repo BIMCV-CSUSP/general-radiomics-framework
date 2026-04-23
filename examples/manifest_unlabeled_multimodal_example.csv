@@ -1,0 +1,3 @@
+patient_id,study_id,T1,T2,mask
+PIT_001,S001,/path/to/PIT_001_0000.nii.gz,/path/to/PIT_001_0001.nii.gz,/path/to/PIT_001_mask.nii.gz
+PIT_002,S002,/path/to/PIT_002_0000.nii.gz,/path/to/PIT_002_0001.nii.gz,/path/to/PIT_002_mask.nii.gz

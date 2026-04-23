@@ -53,7 +53,9 @@ def load_manifest(config: ProjectConfig) -> pd.DataFrame:
         raise FileNotFoundError(f"Manifest not found: {config.manifest}")
     manifest = pd.read_csv(config.manifest)
     manifest[config.columns.sample_id] = make_sample_id(manifest, config.columns.sample_id)
-    required_columns = {config.columns.sample_id, config.columns.label}
+    required_columns = {config.columns.sample_id}
+    if config.columns.label:
+        required_columns.add(config.columns.label)
     if config.columns.group_id:
         required_columns.add(config.columns.group_id)
     for modality in config.enabled_modalities:
@@ -89,8 +91,9 @@ def metadata_from_row(config: ProjectConfig, row: pd.Series) -> dict[str, Any]:
 
     metadata = {
         "sample_id": row[config.columns.sample_id],
-        "label": row[config.columns.label],
     }
+    if config.columns.label and config.columns.label in row.index:
+        metadata["label"] = row[config.columns.label]
     if config.columns.group_id and config.columns.group_id in row.index:
         metadata["group_id"] = row[config.columns.group_id]
     return metadata

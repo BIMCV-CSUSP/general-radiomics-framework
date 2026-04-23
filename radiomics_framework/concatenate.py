@@ -35,7 +35,9 @@ def setup_logger(output_path: Path) -> logging.Logger:
 
 
 def _metadata_columns(config: ProjectConfig) -> list[str]:
-    metadata = ["sample_id", "label"]
+    metadata = ["sample_id"]
+    if config.columns.label:
+        metadata.append("label")
     if config.columns.group_id:
         metadata.append("group_id")
     return metadata

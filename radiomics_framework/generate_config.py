@@ -63,6 +63,7 @@ GROUP_CANDIDATES = (
 )
 SAMPLE_CANDIDATES = (
     "sample_id",
+    "study_id",
     "image_id",
     "scan_id",
     "lesion_id",
@@ -142,15 +143,13 @@ def pick_first_existing(columns: list[str], candidates: tuple[str, ...]) -> str 
     return None
 
 
-def infer_label_column(columns: list[str]) -> str:
+def infer_label_column(columns: list[str]) -> str | None:
     """Infer the target column from common names."""
 
     label_column = pick_first_existing(columns, LABEL_CANDIDATES)
     if label_column:
         return label_column
-    raise ValueError(
-        "Could not infer the label column. Use --label-column to specify it explicitly."
-    )
+    return None
 
 
 def infer_sample_column(columns: list[str]) -> str:

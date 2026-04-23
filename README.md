@@ -66,6 +66,10 @@ does not detect the right columns, pass them explicitly with `--image-column`,
 `--mask-column`, `--sample-id-column`, `--group-id-column`, and
 `--label-column`.
 
+If your manifest does not have an outcome column yet, the generated config uses
+`label: null`. Extraction and concatenation still work; training requires adding
+a label column later.
+
 Extract features:
 
 ```bash
@@ -156,6 +160,19 @@ python -m radiomics_framework.generate_config \
   --mask-column tumor_mask_path \
   --include-full-roi
 ```
+
+For an unlabeled multi-modal manifest such as `patient_id,study_id,T1,T2,mask`,
+run:
+
+```bash
+python -m radiomics_framework.generate_config \
+  --manifest /path/to/manifest.csv \
+  --output configs/pituitary.yaml \
+  --project-name pituitary_radiomics
+```
+
+This will infer `study_id` as `sample_id`, `patient_id` as `group_id`, `T1` and
+`T2` as modalities, `mask` as ROI, and `label: null`.
 
 ## Methodological safeguards
 

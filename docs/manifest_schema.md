@@ -6,7 +6,7 @@ example one patient, lesion, study, slice stack, or scan.
 ## Required modeling columns
 
 - `sample_id`: unique sample identifier. If omitted, extraction can create a stable row-based identifier, but explicit IDs are recommended.
-- `label`: target variable. Binary labels are expected by the current training CLI.
+- `label`: optional target variable. Binary labels are expected by the current training CLI, but extraction and concatenation can run with `label: null`.
 - `group_id`: optional grouping identifier used to avoid leakage across folds. Typical values are patient IDs, subject IDs, acquisition IDs, or site IDs.
 
 ## Required image columns
@@ -82,3 +82,13 @@ python -m radiomics_framework.generate_config \
   --image-column ct_path \
   --mask-column lesion_mask_path
 ```
+
+For a manifest without labels, such as:
+
+```csv
+patient_id,study_id,T1,T2,mask
+PIT_001,S001,/path/to/PIT_001_0000.nii.gz,/path/to/PIT_001_0001.nii.gz,/path/to/PIT_001_mask.nii.gz
+```
+
+the generator will write `label: null`. You can extract and concatenate
+features, then add a label column later before running training.

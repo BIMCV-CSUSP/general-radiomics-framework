@@ -1,0 +1,43 @@
+# Generic radiomics project configuration.
+#
+# Copy this file for a new dataset and update only the manifest columns,
+# modalities, ROIs, and preprocessing choices.
+
+project:
+  name: example_radiomics_project
+  root: ..
+  manifest: examples/manifest_example.csv
+  output_dir: artifacts/radiomics
+
+columns:
+  sample_id: sample_id
+  label: label
+  group_id: patient_id
+
+modalities:
+  - name: image
+    image_column: image_path
+    params: configs/pyradiomics_default.yaml
+    enabled: true
+
+rois:
+  - name: roi
+    mask_column: mask_path
+    label: 1
+    enabled: true
+  - name: full
+    mode: full
+    label: 1
+    enabled: false
+
+preprocessing:
+  cast_float32: true
+  n4_bias_correction: false
+  n4_shrink_factor: 4
+  denoise: false
+  denoise_time_step: 0.01875
+  resample_mask_to_image: true
+
+execution:
+  n_jobs: 1
+  continue_on_error: true

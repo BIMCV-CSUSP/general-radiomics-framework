@@ -1,0 +1,25 @@
+setting:
+  normalize: true
+  normalizeScale: 100
+  preCrop: true
+  interpolator: sitkBSpline
+  force2D: false
+  geometryTolerance: 1.0e-3
+  correctMask: true
+  binWidth: 25
+  label: 1
+
+imageType:
+  Original: {}
+  LoG:
+    sigma: [1.0, 2.0, 3.0]
+  Wavelet: {}
+
+featureClass:
+  shape: []
+  firstorder: []
+  glcm: []
+  glrlm: []
+  glszm: []
+  ngtdm: []
+  gldm: []

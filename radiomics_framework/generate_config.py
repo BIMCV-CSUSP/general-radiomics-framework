@@ -244,15 +244,63 @@ def build_config_payload(args: argparse.Namespace) -> dict[str, Any]:
     except ValueError:
         pass
 
-    params_path = args.params or "configs/pyradiomics_default.yaml"
+    modality_specs = [
+        {"name": strip_path_suffix(column), "image_column": column}
+        for column in image_columns
+    ]
+    fallback_params = args.params or "configs/pyradiomics_default.yaml"
+
+    params_by_modality: dict[str, str] = {}
+    auto_preprocessing: dict[str, Any] | None = None
+    if getattr(args, "auto_params", False):
+        from radiomics_framework import pyradiomics_params
+
+        params_dir = Path(
+            getattr(args, "auto_params_dir", None) or "configs"
+        )
+        if not params_dir.is_absolute():
+            params_dir = (project_root / params_dir).resolve()
+        mask_hint: str | None = None
+        if args.mask_column:
+            mask_hint = args.mask_column[0]
+        elif "mask_columns" in locals() and mask_columns:
+            mask_hint = mask_columns[0]
+        written = pyradiomics_params.generate_params_for_modalities(
+            manifest_path=manifest,
+            project_root=project_root,
+            modalities=modality_specs,
+            output_dir=params_dir,
+            mask_column=mask_hint,
+            max_samples=int(
+                getattr(args, "auto_params_samples", 20)
+                if getattr(args, "auto_params_samples", None) is not None
+                else 20
+            ),
+            target_bin_count=int(
+                getattr(args, "auto_params_target_bins", 32) or 32
+            ),
+            label=int(getattr(args, "mask_label", 1) or 1),
+        )
+        for modality_name, result in written.items():
+            yaml_path = result.yaml_path
+            try:
+                relative_path = Path(yaml_path).resolve().relative_to(project_root)
+                params_by_modality[modality_name] = str(relative_path)
+            except ValueError:
+                params_by_modality[modality_name] = str(Path(yaml_path).resolve())
+
+        auto_preprocessing = pyradiomics_params.derive_preprocessing_from_fingerprints(
+            result.fingerprint for result in written.values()
+        )
+
     modalities = [
         {
-            "name": strip_path_suffix(column),
-            "image_column": column,
-            "params": params_path,
+            "name": spec["name"],
+            "image_column": spec["image_column"],
+            "params": params_by_modality.get(spec["name"], fallback_params),
             "enabled": True,
         }
-        for column in image_columns
+        for spec in modality_specs
     ]
 
     rois = [
@@ -288,19 +336,35 @@ def build_config_payload(args: argparse.Namespace) -> dict[str, Any]:
         },
         "modalities": modalities,
         "rois": rois,
-        "preprocessing": {
-            "cast_float32": True,
-            "n4_bias_correction": args.n4_bias_correction,
-            "n4_shrink_factor": 4,
-            "denoise": args.denoise,
-            "denoise_time_step": 0.01875,
-            "resample_mask_to_image": True,
-        },
+        "preprocessing": _merge_preprocessing(auto_preprocessing, args),
         "execution": {
             "n_jobs": args.n_jobs,
             "continue_on_error": True,
         },
     }
+
+
+def _merge_preprocessing(
+    auto_preprocessing: dict[str, Any] | None,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    """Combine fingerprint-derived preprocessing with explicit CLI overrides."""
+
+    base: dict[str, Any] = {
+        "cast_float32": True,
+        "n4_bias_correction": False,
+        "n4_shrink_factor": 4,
+        "denoise": False,
+        "denoise_time_step": 0.01875,
+        "resample_mask_to_image": True,
+    }
+    if auto_preprocessing:
+        base.update(auto_preprocessing)
+    if args.n4_bias_correction:
+        base["n4_bias_correction"] = True
+    if args.denoise:
+        base["denoise"] = True
+    return base
 
 
 def yaml_scalar(value: Any) -> str:
@@ -423,6 +487,31 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--n-jobs", type=int, default=1, help="Extraction parallel jobs.")
     parser.add_argument("--n4-bias-correction", action="store_true")
     parser.add_argument("--denoise", action="store_true")
+    parser.add_argument(
+        "--auto-params",
+        action="store_true",
+        help=(
+            "Fingerprint each inferred modality and write a dedicated "
+            "PyRadiomics YAML next to the project config."
+        ),
+    )
+    parser.add_argument(
+        "--auto-params-dir",
+        default=None,
+        help="Directory for generated per-modality PyRadiomics YAMLs (default: configs).",
+    )
+    parser.add_argument(
+        "--auto-params-samples",
+        type=int,
+        default=20,
+        help="Number of images to sample per modality when fingerprinting.",
+    )
+    parser.add_argument(
+        "--auto-params-target-bins",
+        type=int,
+        default=32,
+        help="Target number of gray-level bins used to derive binWidth.",
+    )
     return parser.parse_args()
 
 

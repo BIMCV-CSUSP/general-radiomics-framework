@@ -30,6 +30,27 @@ def main() -> None:
     init_parser.add_argument("--n-jobs", type=int, default=1)
     init_parser.add_argument("--n4-bias-correction", action="store_true")
     init_parser.add_argument("--denoise", action="store_true")
+    init_parser.add_argument("--auto-params", action="store_true")
+    init_parser.add_argument("--auto-params-dir", default=None)
+    init_parser.add_argument("--auto-params-samples", type=int, default=20)
+    init_parser.add_argument("--auto-params-target-bins", type=int, default=32)
+
+    params_parser = subparsers.add_parser(
+        "init-pyradiomics-params",
+        help="Fingerprint a manifest and write a PyRadiomics YAML per modality.",
+    )
+    params_parser.add_argument("--manifest", required=True)
+    params_parser.add_argument("--project-root", default=None)
+    params_parser.add_argument("--modality", action="append", default=[])
+    params_parser.add_argument("--mask-column", default=None)
+    params_parser.add_argument("--output-dir", default="configs")
+    params_parser.add_argument("--max-samples", type=int, default=20)
+    params_parser.add_argument("--target-bin-count", type=int, default=32)
+    params_parser.add_argument("--label", type=int, default=1)
+    params_parser.add_argument(
+        "--filename-template", default="pyradiomics_{name}.yaml"
+    )
+    params_parser.add_argument("--no-save-fingerprint", action="store_true")
 
     concat_parser = subparsers.add_parser("concatenate", help="Concatenate extracted features.")
     concat_parser.add_argument("--config", required=True)
@@ -74,6 +95,37 @@ def main() -> None:
         print(f"Generated config: {output}")
         print(f"Modalities: {[item['name'] for item in payload['modalities']]}")
         print(f"ROIs: {[item['name'] for item in payload['rois']]}")
+    elif args.command == "init-pyradiomics-params":
+        from radiomics_framework import pyradiomics_params
+
+        manifest_path = Path(args.manifest).resolve()
+        project_root = (
+            Path(args.project_root).resolve()
+            if args.project_root
+            else manifest_path.parent
+        )
+        if args.modality:
+            modalities = [
+                pyradiomics_params._parse_modality_spec(spec) for spec in args.modality
+            ]
+        else:
+            modalities = pyradiomics_params._infer_modalities_from_manifest(
+                manifest_path, args.mask_column
+            )
+        written = pyradiomics_params.generate_params_for_modalities(
+            manifest_path=manifest_path,
+            project_root=project_root,
+            modalities=modalities,
+            output_dir=Path(args.output_dir),
+            mask_column=args.mask_column,
+            max_samples=args.max_samples,
+            target_bin_count=args.target_bin_count,
+            label=args.label,
+            filename_template=args.filename_template,
+            save_fingerprint=not args.no_save_fingerprint,
+        )
+        for name, result in written.items():
+            print(f"{name}: {result.yaml_path}")
     elif args.command == "extract":
         from radiomics_framework import extract
 

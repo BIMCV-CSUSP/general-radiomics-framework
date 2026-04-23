@@ -1,0 +1,38 @@
+project:
+  name: pituitary_radiomics
+  root: /mnt/datalake/FISABIO_datalake/pituitaria/general-radiomics-framework
+  manifest: examples/dataset_igtpT1T2.csv
+  output_dir: artifacts/radiomics
+
+columns:
+  sample_id: study_id
+  label: null
+  group_id: patient_id
+
+modalities:
+  - name: t1
+    image_column: T1
+    params: configs/pyradiomics_t1.yaml
+    enabled: true
+  - name: t2
+    image_column: T2
+    params: configs/pyradiomics_t2.yaml
+    enabled: true
+
+rois:
+  - name: mask
+    mask_column: mask
+    label: 1
+    enabled: true
+
+preprocessing:
+  cast_float32: true
+  n4_bias_correction: true
+  n4_shrink_factor: 4
+  denoise: false
+  denoise_time_step: 0.01875
+  resample_mask_to_image: true
+
+execution:
+  n_jobs: 1
+  continue_on_error: true

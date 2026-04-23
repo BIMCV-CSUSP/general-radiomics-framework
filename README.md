@@ -174,6 +174,58 @@ python -m radiomics_framework.generate_config \
 This will infer `study_id` as `sample_id`, `patient_id` as `group_id`, `T1` and
 `T2` as modalities, `mask` as ROI, and `label: null`.
 
+## Modality-aware PyRadiomics params
+
+The framework can build a PyRadiomics parameter YAML per modality from a
+dataset *fingerprint* instead of reusing the generic
+`configs/pyradiomics_default.yaml`. Each modality is sampled, its voxel
+spacing, image size and intensity distribution are summarised, and the
+following settings are derived automatically:
+
+- `normalize` / `normalizeScale` / `voxelArrayShift` — enabled for MR-like
+  modalities (T1, T2, FLAIR, DWI, ...); disabled for CT, PET and
+  quantitative maps (ADC, T1/T2 maps).
+- `resampledPixelSpacing` — median spacing across the sample. For
+  anisotropic volumes the slice axis is set to `0` so PyRadiomics resamples
+  only in-plane.
+- `force2D` / `force2Ddimension` — enabled when the slice spacing is at
+  least 2x larger than the in-plane spacing, using the axis with the
+  largest spacing.
+- `binWidth` — derived from the observed `p99 - p01` intensity range and
+  the target number of gray-level bins (default 32). For normalized MR
+  images the bin width is computed after applying the normalization gain
+  so that the number of bins stays consistent across scanners.
+- `resegmentRange` — set to `[-1000, 3000]` HU for CT.
+- `imageType` — `Original`, `LoG` and `Wavelet` are always enabled;
+  `Square`, `SquareRoot`, `Logarithm` and `Exponential` are added for
+  MR-like modalities where monotonic intensity transforms are meaningful.
+
+Generate the YAMLs standalone:
+
+```bash
+python -m radiomics_framework.pyradiomics_params \
+  --manifest examples/dataset_igtpT1T2.csv \
+  --modality t1:T1 \
+  --modality t2:T2 \
+  --mask-column mask \
+  --output-dir configs
+```
+
+Or, more commonly, have `init-config` generate them alongside the project
+YAML and wire them into each modality automatically:
+
+```bash
+python -m radiomics_framework.generate_config \
+  --manifest examples/dataset_igtpT1T2.csv \
+  --output configs/pituitary.yaml \
+  --project-name pituitary_radiomics \
+  --auto-params
+```
+
+The generated files are named `pyradiomics_<modality>.yaml` and carry a
+header comment with the fingerprint used to derive their values
+(sample size, median spacing, intensity percentiles, detected kind).
+
 ## Methodological safeguards
 
 The training pipeline includes reliability-oriented defaults:

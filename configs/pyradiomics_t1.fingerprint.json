@@ -1,0 +1,38 @@
+{
+  "name": "t1",
+  "image_column": "T1",
+  "n_sampled": 117,
+  "n_available": 117,
+  "spacing_median_xyz": [
+    0.46875,
+    3.299997091293335,
+    0.46875
+  ],
+  "spacing_min_xyz": [
+    0.17579999566078186,
+    0.9999987483024597,
+    0.17579999566078186
+  ],
+  "spacing_max_xyz": [
+    0.8984000086784363,
+    5.999983310699463,
+    0.8984000086784363
+  ],
+  "size_median_xyz": [
+    384,
+    12,
+    384
+  ],
+  "is_anisotropic": true,
+  "slice_axis_sitk": 1,
+  "intensity_p01": 160.0,
+  "intensity_p50": 586.0,
+  "intensity_p99": 1994.0,
+  "intensity_min": 0.0,
+  "intensity_max": 7273.0,
+  "intensity_mean": 740.0870919340156,
+  "intensity_std": 454.6212518877559,
+  "range_p99_p01": 1834.0,
+  "modality_kind": "mr",
+  "used_mask": true
+}

@@ -85,12 +85,102 @@ def _slice_index_from_mask(mask_array: np.ndarray, label: int) -> int:
     return mask_array.shape[0] // 2
 
 
-def _as_slice(array: np.ndarray, slice_index: int) -> np.ndarray:
+def _extract_plane(array: np.ndarray, axis: int, slice_index: int) -> np.ndarray:
     if array.ndim == 2:
         return array
     if array.ndim == 3:
-        return array[slice_index]
+        return np.take(array, indices=slice_index, axis=axis)
     raise ValueError(f"QC plotting supports 2D/3D images. Found array shape={array.shape}")
+
+
+def _plane_name(axis: int, ndim: int) -> str:
+    if ndim == 2:
+        return "2d"
+    return {0: "axial", 1: "coronal", 2: "sagittal"}[axis]
+
+
+def _plane_spacing(image: sitk.Image, axis: int) -> tuple[float, float]:
+    spacing_x, spacing_y, spacing_z = (tuple(image.GetSpacing()) + (1.0, 1.0, 1.0))[:3]
+    if axis == 0:
+        return float(spacing_y), float(spacing_x)
+    if axis == 1:
+        return float(spacing_z), float(spacing_x)
+    if axis == 2:
+        return float(spacing_z), float(spacing_y)
+    raise ValueError(f"Unexpected axis={axis}")
+
+
+def _best_plane_from_mask(mask_array: np.ndarray, label: int) -> tuple[int, int]:
+    if mask_array.ndim == 2:
+        return 0, 0
+    if mask_array.ndim != 3:
+        raise ValueError(f"QC plotting supports 2D/3D masks. Found array shape={mask_array.shape}")
+
+    mask_binary = mask_array == label
+    best_axis = 0
+    best_slice_index = _slice_index_from_mask(mask_array, label)
+    best_score = -1
+    for axis in range(3):
+        reduce_axes = tuple(index for index in range(3) if index != axis)
+        slice_counts = mask_binary.sum(axis=reduce_axes)
+        max_count = int(slice_counts.max())
+        if max_count > best_score:
+            best_score = max_count
+            best_axis = axis
+            best_slice_index = int(np.argmax(slice_counts)) if max_count > 0 else mask_array.shape[axis] // 2
+    return best_axis, best_slice_index
+
+
+def _crop_bounds(mask_slice: np.ndarray, *, margin_pixels: int = 12) -> tuple[int, int, int, int]:
+    positive = np.argwhere(mask_slice)
+    if positive.size == 0:
+        return 0, mask_slice.shape[0], 0, mask_slice.shape[1]
+    row_min, col_min = positive.min(axis=0)
+    row_max, col_max = positive.max(axis=0)
+    row_start = max(0, int(row_min) - margin_pixels)
+    row_end = min(mask_slice.shape[0], int(row_max) + margin_pixels + 1)
+    col_start = max(0, int(col_min) - margin_pixels)
+    col_end = min(mask_slice.shape[1], int(col_max) + margin_pixels + 1)
+    return row_start, row_end, col_start, col_end
+
+
+def _crop_array(array: np.ndarray, bounds: tuple[int, int, int, int]) -> np.ndarray:
+    row_start, row_end, col_start, col_end = bounds
+    return array[row_start:row_end, col_start:col_end]
+
+
+def _imshow_physical(
+    axis,
+    image_slice: np.ndarray,
+    *,
+    row_spacing: float,
+    col_spacing: float,
+    cmap: str,
+    vmin: float,
+    vmax: float,
+) -> None:
+    height, width = image_slice.shape
+    extent = [0.0, width * col_spacing, height * row_spacing, 0.0]
+    axis.imshow(
+        image_slice,
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        extent=extent,
+        interpolation="nearest",
+    )
+
+
+def _imshow_overlay(axis, mask_slice: np.ndarray, *, row_spacing: float, col_spacing: float) -> None:
+    height, width = mask_slice.shape
+    extent = [0.0, width * col_spacing, height * row_spacing, 0.0]
+    axis.imshow(
+        np.ma.masked_where(~mask_slice, mask_slice),
+        cmap="autumn",
+        alpha=0.45,
+        extent=extent,
+        interpolation="nearest",
+    )
 
 
 def _display_limits(image_slice: np.ndarray) -> tuple[float, float]:
@@ -112,34 +202,85 @@ def _write_qc_panel(
     label: int,
     output_path: Path,
     title: str,
-) -> None:
+) -> dict[str, int | str]:
     plt = _setup_matplotlib()
     raw_array = sitk.GetArrayFromImage(raw_image).astype(float)
     processed_array = sitk.GetArrayFromImage(processed_image).astype(float)
     mask_array = sitk.GetArrayFromImage(mask)
-    slice_index = _slice_index_from_mask(mask_array, label)
+    plane_axis, slice_index = _best_plane_from_mask(mask_array, label)
 
-    raw_slice = _as_slice(raw_array, min(slice_index, raw_array.shape[0] - 1) if raw_array.ndim == 3 else 0)
-    processed_slice = _as_slice(processed_array, slice_index)
-    mask_slice = _as_slice(mask_array, slice_index) == label
+    raw_slice = _extract_plane(raw_array, plane_axis, slice_index)
+    processed_slice = _extract_plane(processed_array, plane_axis, slice_index)
+    mask_slice = _extract_plane(mask_array, plane_axis, slice_index) == label
     raw_low, raw_high = _display_limits(raw_slice)
     processed_low, processed_high = _display_limits(processed_slice)
+    row_spacing, col_spacing = _plane_spacing(processed_image, plane_axis)
+    crop_bounds = _crop_bounds(mask_slice)
 
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-    axes[0].imshow(raw_slice, cmap="gray", vmin=raw_low, vmax=raw_high)
-    axes[0].set_title("Raw")
-    axes[1].imshow(processed_slice, cmap="gray", vmin=processed_low, vmax=processed_high)
-    axes[1].set_title("Preprocessed")
-    axes[2].imshow(processed_slice, cmap="gray", vmin=processed_low, vmax=processed_high)
-    axes[2].imshow(np.ma.masked_where(~mask_slice, mask_slice), cmap="autumn", alpha=0.45)
-    axes[2].set_title("Mask overlay")
-    for axis in axes:
-        axis.axis("off")
-    fig.suptitle(title)
+    fig, axes = plt.subplots(2, 3, figsize=(12, 7))
+    panels = [
+        (0, 0, raw_slice, "Raw full", raw_low, raw_high),
+        (0, 1, processed_slice, "Preprocessed full", processed_low, processed_high),
+        (0, 2, processed_slice, "Mask overlay full", processed_low, processed_high),
+        (1, 0, _crop_array(raw_slice, crop_bounds), "Raw ROI zoom", raw_low, raw_high),
+        (1, 1, _crop_array(processed_slice, crop_bounds), "Preprocessed ROI zoom", processed_low, processed_high),
+        (1, 2, _crop_array(processed_slice, crop_bounds), "Mask overlay ROI zoom", processed_low, processed_high),
+    ]
+    for row_index, col_index, image_slice, panel_title, low, high in panels:
+        _imshow_physical(
+            axes[row_index, col_index],
+            image_slice,
+            row_spacing=row_spacing,
+            col_spacing=col_spacing,
+            cmap="gray",
+            vmin=low,
+            vmax=high,
+        )
+        axes[row_index, col_index].set_title(panel_title)
+        axes[row_index, col_index].axis("off")
+
+    _imshow_physical(
+        axes[0, 2],
+        processed_slice,
+        row_spacing=row_spacing,
+        col_spacing=col_spacing,
+        cmap="gray",
+        vmin=processed_low,
+        vmax=processed_high,
+    )
+    _imshow_overlay(axes[0, 2], mask_slice, row_spacing=row_spacing, col_spacing=col_spacing)
+    _imshow_physical(
+        axes[1, 2],
+        _crop_array(processed_slice, crop_bounds),
+        row_spacing=row_spacing,
+        col_spacing=col_spacing,
+        cmap="gray",
+        vmin=processed_low,
+        vmax=processed_high,
+    )
+    _imshow_overlay(
+        axes[1, 2],
+        _crop_array(mask_slice, crop_bounds),
+        row_spacing=row_spacing,
+        col_spacing=col_spacing,
+    )
+
+    plane_name = _plane_name(plane_axis, mask_array.ndim)
+    fig.suptitle(f"{title} | plane={plane_name} | slice={slice_index}")
     fig.tight_layout()
     ensure_directory(output_path.parent)
     fig.savefig(output_path, dpi=180, bbox_inches="tight")
     plt.close(fig)
+    row_start, row_end, col_start, col_end = crop_bounds
+    return {
+        "qc_plane": plane_name,
+        "qc_plane_axis": int(plane_axis),
+        "qc_slice_index": int(slice_index),
+        "qc_crop_row_start": int(row_start),
+        "qc_crop_row_end": int(row_end),
+        "qc_crop_col_start": int(col_start),
+        "qc_crop_col_end": int(col_end),
+    }
 
 
 def export_image_qc(
@@ -174,7 +315,7 @@ def export_image_qc(
                     output_path = image_dir / (
                         f"{_safe_name(sample_id)}__{_safe_name(modality.name)}__{_safe_name(roi.name)}.png"
                     )
-                    _write_qc_panel(
+                    qc_metadata = _write_qc_panel(
                         raw_image,
                         processed_image,
                         mask,
@@ -192,6 +333,7 @@ def export_image_qc(
                             **_image_stats("raw", raw_image),
                             **_image_stats("preprocessed", processed_image),
                             **_mask_stats(mask, roi.label),
+                            **qc_metadata,
                         }
                     )
                 except Exception as exc:

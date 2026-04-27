@@ -58,6 +58,12 @@ def main() -> None:
     concat_parser.add_argument("--shape_reference_modality", default=None)
     concat_parser.add_argument("--output", default=None)
 
+    qc_parser = subparsers.add_parser("qc-images", help="Export raw/preprocessed/mask QC images.")
+    qc_parser.add_argument("--config", required=True)
+    qc_parser.add_argument("--output_dir", default=None)
+    qc_parser.add_argument("--max_cases", type=int, default=12)
+    qc_parser.add_argument("--random_state", type=int, default=42)
+
     train_parser = subparsers.add_parser("train", help="Train radiomics models.")
     train_parser.add_argument("--config", required=True)
     train_parser.add_argument("--features", required=True)
@@ -83,6 +89,19 @@ def main() -> None:
     train_parser.add_argument("--tune_inner_splits", type=int, default=3)
     train_parser.add_argument("--search_n_jobs", type=int, default=1)
     train_parser.add_argument("--export_best_model", action="store_true")
+    train_parser.add_argument("--explain_best_model", action="store_true")
+    train_parser.add_argument("--shap_max_samples", type=int, default=100)
+    train_parser.add_argument("--shap_background_samples", type=int, default=50)
+    train_parser.add_argument("--shap_max_display", type=int, default=30)
+    train_parser.add_argument("--lime_max_samples", type=int, default=25)
+    train_parser.add_argument("--lime_num_features", type=int, default=15)
+    train_parser.add_argument("--feature_distribution_top_n", type=int, default=30)
+    train_parser.add_argument("--importance_top_n", type=int, default=30)
+    train_parser.add_argument("--permutation_repeats", type=int, default=20)
+    train_parser.add_argument("--correlation_top_n", type=int, default=50)
+    train_parser.add_argument("--skip_report_plots", action="store_true")
+    train_parser.add_argument("--skip_lime", action="store_true")
+    train_parser.add_argument("--skip_permutation_importance", action="store_true")
 
     args = parser.parse_args()
     if args.command == "init-config":
@@ -148,6 +167,17 @@ def main() -> None:
         concatenate.ensure_directory(output.parent)
         df.to_csv(output, index=False)
         logger.info("Saved concatenated table to %s", output)
+    elif args.command == "qc-images":
+        from radiomics_framework import qc
+
+        config = qc.load_project_config(args.config)
+        output_dir = Path(args.output_dir).resolve() if args.output_dir else None
+        qc.export_image_qc(
+            config,
+            output_dir=output_dir,
+            max_cases=args.max_cases,
+            random_state=args.random_state,
+        )
     elif args.command == "train":
         from radiomics_framework import train
 

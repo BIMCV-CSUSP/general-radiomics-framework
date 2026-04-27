@@ -50,6 +50,15 @@ from radiomics_framework.features import (
     prepare_numeric_feature_matrix,
     select_radiomics_features,
 )
+from radiomics_framework.reports import (
+    export_evaluation_plots,
+    export_feature_distribution_plots,
+    export_feature_selection_stability,
+    export_lime_interpretability,
+    export_model_feature_importance,
+    export_selected_feature_correlation,
+    write_run_manifest,
+)
 
 
 def setup_logger(output_dir: Path) -> logging.Logger:
@@ -553,7 +562,7 @@ def fit_export_model(
     output_dir: Path,
     selection_args: dict,
     random_state: int,
-) -> None:
+) -> dict:
     """Fit the selected best model on all data and save it with feature metadata."""
 
     if feature_strategy == "most_discriminant":
@@ -577,6 +586,114 @@ def fit_export_model(
         "uses_grouping": groups is not None,
     }
     joblib.dump(payload, output_dir / "best_model.joblib", compress=3)
+    return payload
+
+
+def _sample_dataframe(df: pd.DataFrame, *, max_rows: int, random_state: int) -> pd.DataFrame:
+    """Return a deterministic row sample without changing row order when not needed."""
+
+    if max_rows <= 0:
+        raise ValueError("SHAP sample sizes must be positive integers.")
+    if len(df) <= max_rows:
+        return df.copy()
+    return df.sample(n=max_rows, random_state=random_state).sort_index().copy()
+
+
+def export_shap_interpretability(
+    fitted_model,
+    X_selected: pd.DataFrame,
+    sample_ids: np.ndarray,
+    output_dir: Path,
+    *,
+    max_samples: int,
+    background_samples: int,
+    max_display: int,
+    random_state: int,
+    logger: logging.Logger,
+) -> None:
+    """Export model-agnostic SHAP values for the final class-1 probability."""
+
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg", force=True)
+        import matplotlib.pyplot as plt
+        import shap
+    except ImportError as exc:
+        raise RuntimeError(
+            "SHAP interpretability requires shap and matplotlib. "
+            "Install the project requirements before using --explain_best_model."
+        ) from exc
+
+    interpretability_dir = ensure_directory(output_dir / "interpretability")
+    feature_names = X_selected.columns.tolist()
+    explain_df = _sample_dataframe(X_selected, max_rows=max_samples, random_state=random_state)
+    background_df = _sample_dataframe(
+        X_selected,
+        max_rows=min(background_samples, len(X_selected)),
+        random_state=random_state + 1,
+    )
+    explain_sample_ids = pd.Series(sample_ids, index=X_selected.index).loc[explain_df.index].astype(str)
+
+    def predict_class_1(data) -> np.ndarray:
+        frame = pd.DataFrame(data, columns=feature_names)
+        return predict_probability(fitted_model, frame)
+
+    min_evals = 2 * len(feature_names) + 1
+    masker = shap.maskers.Independent(background_df, max_samples=len(background_df))
+    explainer = shap.Explainer(predict_class_1, masker, algorithm="permutation")
+    explanation = explainer(explain_df, max_evals=min_evals)
+    shap_values = np.asarray(explanation.values)
+    base_values = np.asarray(explanation.base_values)
+    if base_values.ndim == 0:
+        base_values = np.repeat(float(base_values), len(explain_df))
+
+    shap_df = pd.DataFrame(shap_values, columns=feature_names)
+    shap_df.insert(0, "sample_id", explain_sample_ids.to_numpy())
+    shap_df.to_csv(interpretability_dir / "shap_values_class1.csv", index=False)
+
+    values_df = explain_df.reset_index(drop=True).copy()
+    values_df.insert(0, "sample_id", explain_sample_ids.to_numpy())
+    values_df.to_csv(interpretability_dir / "shap_explained_feature_values.csv", index=False)
+
+    base_df = pd.DataFrame(
+        {
+            "sample_id": explain_sample_ids.to_numpy(),
+            "base_value_class1_probability": base_values.reshape(-1),
+        }
+    )
+    base_df.to_csv(interpretability_dir / "shap_base_values.csv", index=False)
+
+    importance_df = (
+        pd.DataFrame(
+            {
+                "feature": feature_names,
+                "mean_abs_shap": np.abs(shap_values).mean(axis=0),
+                "mean_shap": shap_values.mean(axis=0),
+                "std_shap": shap_values.std(axis=0),
+            }
+        )
+        .sort_values("mean_abs_shap", ascending=False)
+        .reset_index(drop=True)
+    )
+    importance_df.to_csv(interpretability_dir / "shap_feature_importance.csv", index=False)
+
+    shap_explanation = shap.Explanation(
+        values=shap_values,
+        base_values=base_values,
+        data=explain_df.to_numpy(),
+        feature_names=feature_names,
+    )
+    shap.plots.bar(shap_explanation, max_display=max_display, show=False)
+    plt.tight_layout()
+    plt.savefig(interpretability_dir / "shap_bar_class1.png", dpi=200, bbox_inches="tight")
+    plt.close()
+
+    shap.plots.beeswarm(shap_explanation, max_display=max_display, show=False)
+    plt.tight_layout()
+    plt.savefig(interpretability_dir / "shap_beeswarm_class1.png", dpi=200, bbox_inches="tight")
+    plt.close()
+    logger.info("Saved SHAP interpretability outputs to %s", interpretability_dir)
 
 
 def parse_args() -> argparse.Namespace:
@@ -609,6 +726,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tune_inner_splits", type=int, default=3)
     parser.add_argument("--search_n_jobs", type=int, default=1)
     parser.add_argument("--export_best_model", action="store_true")
+    parser.add_argument(
+        "--explain_best_model",
+        action="store_true",
+        help="Fit/export the final best model and compute model-agnostic SHAP values.",
+    )
+    parser.add_argument("--shap_max_samples", type=int, default=100)
+    parser.add_argument("--shap_background_samples", type=int, default=50)
+    parser.add_argument("--shap_max_display", type=int, default=30)
+    parser.add_argument("--lime_max_samples", type=int, default=25)
+    parser.add_argument("--lime_num_features", type=int, default=15)
+    parser.add_argument("--feature_distribution_top_n", type=int, default=30)
+    parser.add_argument("--importance_top_n", type=int, default=30)
+    parser.add_argument("--permutation_repeats", type=int, default=20)
+    parser.add_argument("--correlation_top_n", type=int, default=50)
+    parser.add_argument("--skip_report_plots", action="store_true")
+    parser.add_argument("--skip_lime", action="store_true")
+    parser.add_argument("--skip_permutation_importance", action="store_true")
     return parser.parse_args()
 
 
@@ -694,14 +828,29 @@ def run_training(args: argparse.Namespace) -> None:
     ci_df.to_csv(output_dir / "bootstrap_group_level_ci.csv", index=False)
     if selection_records:
         selection_dir = ensure_directory(output_dir / "feature_selection")
-        pd.DataFrame(selection_records).to_csv(selection_dir / "selected_features_by_fold.csv", index=False)
+        selection_df = pd.DataFrame(selection_records)
+        selection_df.to_csv(selection_dir / "selected_features_by_fold.csv", index=False)
+        export_feature_selection_stability(
+            selection_df,
+            output_dir,
+            top_n=args.importance_top_n,
+        )
     with (output_dir / "label_mapping.json").open("w", encoding="utf-8") as file_handle:
         json.dump(label_mapping, file_handle, indent=2)
+    if not args.skip_report_plots:
+        export_evaluation_plots(
+            metrics_df,
+            aggregated_df,
+            summary_df,
+            output_dir,
+            threshold=args.classification_threshold,
+        )
+        logger.info("Saved evaluation plots to %s", output_dir / "plots" / "evaluation")
 
     best_model = summary_df.iloc[0]["Classifier"]
     logger.info("Best model by aggregated OOF AUC: %s", best_model)
-    if args.export_best_model:
-        fit_export_model(
+    if args.export_best_model or args.explain_best_model:
+        best_payload = fit_export_model(
             X,
             y,
             groups,
@@ -720,6 +869,74 @@ def run_training(args: argparse.Namespace) -> None:
             random_state=args.random_state,
         )
         logger.info("Saved final fitted model to %s", output_dir / "best_model.joblib")
+        selected_features = best_payload["selected_features"]
+        export_feature_distribution_plots(
+            X,
+            y,
+            selected_features,
+            output_dir,
+            max_features=args.feature_distribution_top_n,
+        )
+        logger.info("Saved selected-feature distribution plots")
+        export_selected_feature_correlation(
+            X,
+            selected_features,
+            output_dir,
+            max_features=args.correlation_top_n,
+        )
+        if not args.skip_permutation_importance:
+            export_model_feature_importance(
+                best_payload["model"],
+                X[selected_features],
+                y,
+                output_dir,
+                permutation_repeats=args.permutation_repeats,
+                random_state=args.random_state,
+                n_jobs=args.search_n_jobs,
+                top_n=args.importance_top_n,
+                logger=logger,
+            )
+        if args.explain_best_model:
+            export_shap_interpretability(
+                best_payload["model"],
+                X[selected_features],
+                sample_ids,
+                output_dir,
+                max_samples=args.shap_max_samples,
+                background_samples=args.shap_background_samples,
+                max_display=args.shap_max_display,
+                random_state=args.random_state,
+                logger=logger,
+            )
+            if not args.skip_lime:
+                export_lime_interpretability(
+                    best_payload["model"],
+                    X[selected_features],
+                    y,
+                    sample_ids,
+                    output_dir,
+                    max_samples=args.lime_max_samples,
+                    num_features=args.lime_num_features,
+                    random_state=args.random_state,
+                    logger=logger,
+                )
+    write_run_manifest(
+        output_dir,
+        {
+            "best_model": str(best_model),
+            "models": args.models,
+            "feature_strategy": args.feature_strategy,
+            "classification_threshold": args.classification_threshold,
+            "report_plots": not args.skip_report_plots,
+            "best_model_exported": bool(args.export_best_model or args.explain_best_model),
+            "shap_enabled": bool(args.explain_best_model),
+            "lime_enabled": bool(args.explain_best_model and not args.skip_lime),
+            "permutation_importance_enabled": bool(
+                (args.export_best_model or args.explain_best_model)
+                and not args.skip_permutation_importance
+            ),
+        },
+    )
 
 
 def main() -> None:

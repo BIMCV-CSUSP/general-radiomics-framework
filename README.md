@@ -95,7 +95,24 @@ python -m radiomics_framework.train \
   --n_splits 5 \
   --n_repeats 10 \
   --bootstrap_iterations 1000 \
-  --export_best_model
+  --export_best_model \
+  --explain_best_model
+```
+
+Create visual image QC panels before/after preprocessing:
+
+```bash
+python -m radiomics_framework.qc \
+  --config configs/project.yaml \
+  --max_cases 24
+```
+
+or with the installed CLI:
+
+```bash
+radiomics-framework qc-images \
+  --config configs/project.yaml \
+  --max_cases 24
 ```
 
 ## Manifest format
@@ -249,12 +266,72 @@ oof_predictions_flat.csv
 oof_predictions_aggregated.csv
 summary_metrics.csv
 bootstrap_group_level_ci.csv
+plots/evaluation/roc_curves.png
+plots/evaluation/precision_recall_curves.png
+plots/evaluation/calibration_curves.png
+plots/evaluation/model_comparison_oof_metrics.png
+plots/evaluation/fold_metric_distributions.png
+plots/evaluation/confusion_matrices/*.png
+threshold_metrics.csv
+decision_curve.csv
+calibration_summary.csv
+plots/feature_distributions/*.png
+feature_distribution_summary.csv
+selected_feature_spearman_correlation.csv
+plots/feature_correlation/selected_feature_correlation_heatmap.png
+feature_importance/model_native_feature_importance.csv
+feature_importance/model_native_feature_importance.png
+feature_importance/model_native_group_importance.csv
+feature_importance/permutation_importance_auc.csv
+feature_importance/permutation_importance_auc.png
+feature_importance/permutation_group_importance_auc.csv
 feature_selection/selected_features_by_fold.csv
+feature_selection/feature_selection_stability.csv
+feature_selection/feature_selection_stability.png
+feature_selection/feature_selection_group_stability.csv
 best_model.joblib
 ```
 
 `best_model.joblib` contains the fitted sklearn pipeline, the selected feature
 names, and model metadata.
+
+When `--explain_best_model` is enabled, the training command also writes:
+
+```text
+interpretability/shap_values_class1.csv
+interpretability/shap_explained_feature_values.csv
+interpretability/shap_base_values.csv
+interpretability/shap_feature_importance.csv
+interpretability/shap_bar_class1.png
+interpretability/shap_beeswarm_class1.png
+interpretability/lime_local_explanations_class1.csv
+interpretability/lime_aggregate_importance_class1.csv
+interpretability/lime_aggregate_importance_class1.png
+```
+
+The SHAP and LIME values explain the final exported best model's class-1
+probability using the selected feature subset. Use `--shap_max_samples`,
+`--shap_background_samples`, `--shap_max_display`, `--lime_max_samples`, and
+`--lime_num_features` to control runtime and plot size.
+
+Feature-importance outputs include native model coefficients/importances when
+the estimator exposes them, permutation importance measured as AUC decrease,
+feature-selection stability across folds/repeats, grouped summaries by
+ROI/modality/image type/feature family, and a selected-feature correlation
+heatmap. Use `--importance_top_n`, `--permutation_repeats`, and
+`--correlation_top_n` to tune these reports.
+
+Image QC outputs are written under `artifacts/radiomics/qc/` by default:
+
+```text
+image_qc_stats.csv
+image_qc_failures.csv
+images/<sample>__<modality>__<roi>.png
+```
+
+Each PNG shows the raw image slice, the preprocessed slice, and the ROI mask
+overlay. The statistics CSV records spacing, size, intensity percentiles, and
+mask volume for auditability.
 
 ## Documentation
 

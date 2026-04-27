@@ -93,7 +93,8 @@ python -m radiomics_framework.train \
   --n_splits 5 \
   --n_repeats 10 \
   --bootstrap_iterations 1000 \
-  --export_best_model
+  --export_best_model \
+  --explain_best_model
 ```
 
 The training step uses reliability-oriented defaults:
@@ -105,8 +106,24 @@ The training step uses reliability-oriented defaults:
 - out-of-fold prediction aggregation across repeats
 - group-level bootstrap confidence intervals
 - optional final export of the best model fitted on all available data
+- optional SHAP and LIME interpretability for the exported best model
+- automatic evaluation plots and selected-feature distribution plots
+- feature importance via native estimator values, permutation importance,
+  selection stability, group summaries, and selected-feature correlation
 
-## 6. Main outputs
+## 6. Visual QC of images and masks
+
+```bash
+python -m radiomics_framework.qc \
+  --config configs/project.yaml \
+  --max_cases 24
+```
+
+This writes raw/preprocessed/mask overlay panels plus `image_qc_stats.csv`
+under `<output_dir>/qc`. Use it before trusting extracted features, especially
+after changing preprocessing or ROI definitions.
+
+## 7. Main outputs
 
 ```text
 results/radiomics_framework/
@@ -115,9 +132,46 @@ results/radiomics_framework/
 ├── oof_predictions_aggregated.csv
 ├── summary_metrics.csv
 ├── bootstrap_group_level_ci.csv
+├── threshold_metrics.csv
+├── decision_curve.csv
+├── calibration_summary.csv
 ├── best_model.joblib
+├── plots/
+│   ├── evaluation/
+│   │   ├── roc_curves.png
+│   │   ├── precision_recall_curves.png
+│   │   ├── calibration_curves.png
+│   │   ├── model_comparison_oof_metrics.png
+│   │   ├── fold_metric_distributions.png
+│   │   ├── threshold_sweep.png
+│   │   ├── decision_curve.png
+│   │   └── confusion_matrices/
+│   ├── feature_distributions/
+│   └── feature_correlation/
+├── feature_distribution_summary.csv
+├── selected_feature_spearman_correlation.csv
+├── feature_importance/
+│   ├── model_native_feature_importance.csv
+│   ├── model_native_feature_importance.png
+│   ├── model_native_group_importance.csv
+│   ├── permutation_importance_auc.csv
+│   ├── permutation_importance_auc.png
+│   └── permutation_group_importance_auc.csv
+├── interpretability/
+│   ├── shap_values_class1.csv
+│   ├── shap_explained_feature_values.csv
+│   ├── shap_base_values.csv
+│   ├── shap_feature_importance.csv
+│   ├── shap_bar_class1.png
+│   ├── shap_beeswarm_class1.png
+│   ├── lime_local_explanations_class1.csv
+│   ├── lime_aggregate_importance_class1.csv
+│   └── lime_aggregate_importance_class1.png
 └── feature_selection/
-    └── selected_features_by_fold.csv
+    ├── selected_features_by_fold.csv
+    ├── feature_selection_stability.csv
+    ├── feature_selection_stability.png
+    └── feature_selection_group_stability.csv
 ```
 
 ## Notes for strict final evaluation

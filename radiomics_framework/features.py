@@ -135,12 +135,16 @@ def infer_feature_limit(
     y_train: np.ndarray,
     n_samples: int,
     *,
+    fixed_feature_count: int | None = None,
     min_features: int = 10,
     max_features_cap: int = 60,
     samples_per_feature: int = 25,
     minority_samples_per_feature: int = 8,
 ) -> int:
     """Infer a conservative feature cap from training-fold size."""
+
+    if fixed_feature_count is not None:
+        return max(1, int(fixed_feature_count))
 
     class_counts = np.bincount(np.asarray(y_train).astype(int))
     minority_count = int(class_counts.min()) if len(class_counts) > 1 else int(class_counts[0])
@@ -187,6 +191,7 @@ def select_radiomics_features(
     *,
     repeat_index: int | None = None,
     fold_index: int | None = None,
+    fixed_feature_count: int | None = None,
     min_features: int = 10,
     max_features_cap: int = 60,
     samples_per_feature: int = 25,
@@ -241,11 +246,13 @@ def select_radiomics_features(
     feature_limit = infer_feature_limit(
         y_train=y_train,
         n_samples=X_train.shape[0],
+        fixed_feature_count=fixed_feature_count,
         min_features=min_features,
         max_features_cap=max_features_cap,
         samples_per_feature=samples_per_feature,
         minority_samples_per_feature=minority_samples_per_feature,
     )
+    feature_limit = min(feature_limit, max(1, X_train.shape[1]))
 
     ranked_valid_features = selection_df.loc[valid_mask, "feature"].tolist()
     fdr_features = selection_df.loc[selection_df["passes_fdr"], "feature"].tolist()

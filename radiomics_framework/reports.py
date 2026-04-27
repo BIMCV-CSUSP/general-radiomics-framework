@@ -124,11 +124,14 @@ def export_evaluation_plots(
     output_dir: Path,
     *,
     threshold: float,
+    best_model_name: str | None = None,
 ) -> None:
     """Write ROC, PR, calibration, confusion, and model-comparison plots."""
 
     plt = _setup_matplotlib()
-    plots_dir = ensure_directory(output_dir / "plots" / "evaluation")
+    evaluation_dir = ensure_directory(output_dir / "plots" / "evaluation")
+    all_models_dir = ensure_directory(evaluation_dir / "all_models")
+    best_model_dir = ensure_directory(evaluation_dir / "best_model")
 
     fig, ax = plt.subplots(figsize=(7, 6))
     for classifier_name, classifier_df in aggregated_df.groupby("Classifier"):
@@ -145,7 +148,7 @@ def export_evaluation_plots(
     ax.set_title("Out-of-fold ROC curves")
     ax.legend(loc="lower right", fontsize=8)
     fig.tight_layout()
-    fig.savefig(plots_dir / "roc_curves.png", dpi=200)
+    fig.savefig(all_models_dir / "roc_curves.png", dpi=200)
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(7, 6))
@@ -162,7 +165,7 @@ def export_evaluation_plots(
     ax.set_title("Out-of-fold precision-recall curves")
     ax.legend(loc="lower left", fontsize=8)
     fig.tight_layout()
-    fig.savefig(plots_dir / "precision_recall_curves.png", dpi=200)
+    fig.savefig(all_models_dir / "precision_recall_curves.png", dpi=200)
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(7, 6))
@@ -179,7 +182,7 @@ def export_evaluation_plots(
     ax.set_title("Calibration curves")
     ax.legend(loc="best", fontsize=8)
     fig.tight_layout()
-    fig.savefig(plots_dir / "calibration_curves.png", dpi=200)
+    fig.savefig(all_models_dir / "calibration_curves.png", dpi=200)
     plt.close(fig)
 
     metric_columns = [
@@ -196,7 +199,7 @@ def export_evaluation_plots(
         ax.set_title("Out-of-fold model comparison")
         ax.legend(loc="best", fontsize=8)
         fig.tight_layout()
-        fig.savefig(plots_dir / "model_comparison_oof_metrics.png", dpi=200)
+        fig.savefig(all_models_dir / "model_comparison_oof_metrics.png", dpi=200)
         plt.close(fig)
 
     if {"Classifier", "val_auc", "val_balanced_accuracy"}.issubset(metrics_df.columns):
@@ -211,10 +214,10 @@ def export_evaluation_plots(
         axes[1].set_ylabel("Balanced accuracy")
         fig.suptitle("")
         fig.tight_layout()
-        fig.savefig(plots_dir / "fold_metric_distributions.png", dpi=200)
+        fig.savefig(all_models_dir / "fold_metric_distributions.png", dpi=200)
         plt.close(fig)
 
-    confusion_dir = ensure_directory(plots_dir / "confusion_matrices")
+    confusion_dir = ensure_directory(all_models_dir / "confusion_matrices")
     for classifier_name, classifier_df in aggregated_df.groupby("Classifier"):
         y_true = classifier_df["true_label"].to_numpy()
         y_pred = (classifier_df["prob_class_1"].to_numpy() >= threshold).astype(int)
@@ -279,7 +282,7 @@ def export_evaluation_plots(
     axes[1].set_title("Threshold sweep")
     axes[1].legend(fontsize=8)
     fig.tight_layout()
-    fig.savefig(plots_dir / "threshold_sweep.png", dpi=200)
+    fig.savefig(all_models_dir / "threshold_sweep.png", dpi=200)
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(7, 6))
@@ -293,7 +296,7 @@ def export_evaluation_plots(
     ax.set_title("Decision curve analysis")
     ax.legend(fontsize=8)
     fig.tight_layout()
-    fig.savefig(plots_dir / "decision_curve.png", dpi=200)
+    fig.savefig(all_models_dir / "decision_curve.png", dpi=200)
     plt.close(fig)
 
     calibration_rows = []
@@ -309,6 +312,107 @@ def export_evaluation_plots(
             }
         )
     pd.DataFrame(calibration_rows).to_csv(output_dir / "calibration_summary.csv", index=False)
+
+    if best_model_name is None:
+        return
+
+    best_predictions = aggregated_df[aggregated_df["Classifier"] == best_model_name].copy()
+    best_metrics = metrics_df[metrics_df["Classifier"] == best_model_name].copy()
+    if best_predictions.empty:
+        return
+
+    y_true = best_predictions["true_label"].to_numpy()
+    y_prob = best_predictions["prob_class_1"].to_numpy()
+
+    fpr, tpr, _ = roc_curve(y_true, y_prob)
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.plot(fpr, tpr, color="#1f77b4", linewidth=2, label=f"AUC={roc_auc_score(y_true, y_prob):.3f}")
+    ax.plot([0, 1], [0, 1], linestyle="--", color="0.6", linewidth=1)
+    ax.set_xlabel("False positive rate")
+    ax.set_ylabel("True positive rate")
+    ax.set_title(f"{best_model_name} ROC")
+    ax.legend(loc="lower right")
+    fig.tight_layout()
+    fig.savefig(best_model_dir / "roc_curve.png", dpi=220)
+    plt.close(fig)
+
+    precision, recall, _ = precision_recall_curve(y_true, y_prob)
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.plot(recall, precision, color="#d62728", linewidth=2, label=f"AP={average_precision_score(y_true, y_prob):.3f}")
+    ax.set_xlabel("Recall")
+    ax.set_ylabel("Precision")
+    ax.set_title(f"{best_model_name} precision-recall")
+    ax.legend(loc="lower left")
+    fig.tight_layout()
+    fig.savefig(best_model_dir / "precision_recall_curve.png", dpi=220)
+    plt.close(fig)
+
+    prob_true, prob_pred = calibration_curve(y_true, y_prob, n_bins=8, strategy="quantile")
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.plot(prob_pred, prob_true, marker="o", color="#2ca02c", linewidth=2)
+    ax.plot([0, 1], [0, 1], linestyle="--", color="0.6", linewidth=1)
+    ax.set_xlabel("Mean predicted probability")
+    ax.set_ylabel("Observed class-1 fraction")
+    ax.set_title(f"{best_model_name} calibration")
+    fig.tight_layout()
+    fig.savefig(best_model_dir / "calibration_curve.png", dpi=220)
+    plt.close(fig)
+
+    matrix = confusion_matrix(y_true, (y_prob >= threshold).astype(int), labels=[0, 1])
+    fig, ax = plt.subplots(figsize=(4.8, 4.8))
+    ax.imshow(matrix, cmap="Blues")
+    for row in range(matrix.shape[0]):
+        for col in range(matrix.shape[1]):
+            ax.text(col, row, str(matrix[row, col]), ha="center", va="center")
+    ax.set_xticks([0, 1], labels=["Pred 0", "Pred 1"])
+    ax.set_yticks([0, 1], labels=["True 0", "True 1"])
+    ax.set_title(f"{best_model_name} confusion matrix")
+    fig.tight_layout()
+    fig.savefig(best_model_dir / "confusion_matrix.png", dpi=220)
+    plt.close(fig)
+
+    best_threshold_df = threshold_df[threshold_df["Classifier"] == best_model_name].copy()
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+    axes[0].plot(best_threshold_df["threshold"], best_threshold_df["sensitivity"], label="Sensitivity", linewidth=2)
+    axes[0].plot(best_threshold_df["threshold"], best_threshold_df["specificity"], label="Specificity", linewidth=2)
+    axes[0].plot(best_threshold_df["threshold"], best_threshold_df["ppv"], label="PPV", linewidth=2)
+    axes[0].plot(best_threshold_df["threshold"], best_threshold_df["npv"], label="NPV", linewidth=2)
+    axes[0].set_xlabel("Threshold")
+    axes[0].set_ylabel("Metric value")
+    axes[0].set_title(f"{best_model_name} threshold metrics")
+    axes[0].legend(fontsize=8)
+    axes[1].plot(best_threshold_df["threshold"], best_threshold_df["balanced_accuracy"], linewidth=2, color="#9467bd")
+    axes[1].set_xlabel("Threshold")
+    axes[1].set_ylabel("Balanced accuracy")
+    axes[1].set_title(f"{best_model_name} balanced accuracy")
+    fig.tight_layout()
+    fig.savefig(best_model_dir / "threshold_sweep.png", dpi=220)
+    plt.close(fig)
+
+    best_decision_df = decision_df[decision_df["Classifier"] == best_model_name].copy()
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.plot(best_decision_df["threshold"], best_decision_df["net_benefit"], linewidth=2, label=best_model_name)
+    ax.plot(best_decision_df["threshold"], best_decision_df["treat_all_net_benefit"], linestyle="--", color="0.5", label="Treat all")
+    ax.plot(best_decision_df["threshold"], best_decision_df["treat_none_net_benefit"], linestyle=":", color="0.2", label="Treat none")
+    ax.set_xlabel("Threshold probability")
+    ax.set_ylabel("Net benefit")
+    ax.set_title(f"{best_model_name} decision curve")
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(best_model_dir / "decision_curve.png", dpi=220)
+    plt.close(fig)
+
+    if not best_metrics.empty:
+        fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
+        axes[0].boxplot(best_metrics["val_auc"].dropna().to_numpy(), tick_labels=["AUC"])
+        axes[0].set_title(f"{best_model_name} fold AUC")
+        axes[0].set_ylabel("AUC")
+        axes[1].boxplot(best_metrics["val_balanced_accuracy"].dropna().to_numpy(), tick_labels=["Balanced accuracy"])
+        axes[1].set_title(f"{best_model_name} fold balanced accuracy")
+        axes[1].set_ylabel("Balanced accuracy")
+        fig.tight_layout()
+        fig.savefig(best_model_dir / "fold_metric_distributions.png", dpi=220)
+        plt.close(fig)
 
 
 def export_feature_distribution_plots(

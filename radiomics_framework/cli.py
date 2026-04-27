@@ -76,6 +76,7 @@ def main() -> None:
     train_parser.add_argument("--classification_threshold", type=float, default=0.5)
     train_parser.add_argument("--bootstrap_iterations", type=int, default=1000)
     train_parser.add_argument("--ci_level", type=float, default=0.95)
+    train_parser.add_argument("--fixed_feature_count", type=int, default=None)
     train_parser.add_argument("--min_features", type=int, default=10)
     train_parser.add_argument("--max_features_cap", type=int, default=60)
     train_parser.add_argument("--samples_per_feature", type=int, default=25)

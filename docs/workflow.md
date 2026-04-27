@@ -90,6 +90,7 @@ python -m radiomics_framework.train \
   --features artifacts/radiomics/concatenated/features_all.csv \
   --output_dir results/radiomics_framework \
   --feature_strategy most_discriminant \
+  --fixed_feature_count 30 \
   --n_splits 5 \
   --n_repeats 10 \
   --bootstrap_iterations 1000 \
@@ -138,14 +139,23 @@ results/radiomics_framework/
 ├── best_model.joblib
 ├── plots/
 │   ├── evaluation/
-│   │   ├── roc_curves.png
-│   │   ├── precision_recall_curves.png
-│   │   ├── calibration_curves.png
-│   │   ├── model_comparison_oof_metrics.png
-│   │   ├── fold_metric_distributions.png
-│   │   ├── threshold_sweep.png
-│   │   ├── decision_curve.png
-│   │   └── confusion_matrices/
+│   │   ├── all_models/
+│   │   │   ├── roc_curves.png
+│   │   │   ├── precision_recall_curves.png
+│   │   │   ├── calibration_curves.png
+│   │   │   ├── model_comparison_oof_metrics.png
+│   │   │   ├── fold_metric_distributions.png
+│   │   │   ├── threshold_sweep.png
+│   │   │   ├── decision_curve.png
+│   │   │   └── confusion_matrices/
+│   │   └── best_model/
+│   │       ├── roc_curve.png
+│   │       ├── precision_recall_curve.png
+│   │       ├── calibration_curve.png
+│   │       ├── confusion_matrix.png
+│   │       ├── threshold_sweep.png
+│   │       ├── decision_curve.png
+│   │       └── fold_metric_distributions.png
 │   ├── feature_distributions/
 │   └── feature_correlation/
 ├── feature_distribution_summary.csv

@@ -92,6 +92,7 @@ python -m radiomics_framework.train \
   --features artifacts/radiomics/concatenated/features_all.csv \
   --output_dir results/radiomics_framework \
   --feature_strategy most_discriminant \
+  --fixed_feature_count 30 \
   --n_splits 5 \
   --n_repeats 10 \
   --bootstrap_iterations 1000 \
@@ -266,12 +267,19 @@ oof_predictions_flat.csv
 oof_predictions_aggregated.csv
 summary_metrics.csv
 bootstrap_group_level_ci.csv
-plots/evaluation/roc_curves.png
-plots/evaluation/precision_recall_curves.png
-plots/evaluation/calibration_curves.png
-plots/evaluation/model_comparison_oof_metrics.png
-plots/evaluation/fold_metric_distributions.png
-plots/evaluation/confusion_matrices/*.png
+plots/evaluation/all_models/roc_curves.png
+plots/evaluation/all_models/precision_recall_curves.png
+plots/evaluation/all_models/calibration_curves.png
+plots/evaluation/all_models/model_comparison_oof_metrics.png
+plots/evaluation/all_models/fold_metric_distributions.png
+plots/evaluation/all_models/confusion_matrices/*.png
+plots/evaluation/best_model/roc_curve.png
+plots/evaluation/best_model/precision_recall_curve.png
+plots/evaluation/best_model/calibration_curve.png
+plots/evaluation/best_model/confusion_matrix.png
+plots/evaluation/best_model/threshold_sweep.png
+plots/evaluation/best_model/decision_curve.png
+plots/evaluation/best_model/fold_metric_distributions.png
 threshold_metrics.csv
 decision_curve.csv
 calibration_summary.csv
@@ -313,6 +321,10 @@ The SHAP and LIME values explain the final exported best model's class-1
 probability using the selected feature subset. Use `--shap_max_samples`,
 `--shap_background_samples`, `--shap_max_display`, `--lime_max_samples`, and
 `--lime_num_features` to control runtime and plot size.
+
+Use `--fixed_feature_count` when you want to force a larger number of selected
+variables than the default adaptive rule would keep. If you leave it unset, the
+framework still uses the conservative sample-aware cap.
 
 Feature-importance outputs include native model coefficients/importances when
 the estimator exposes them, permutation importance measured as AUC decrease,

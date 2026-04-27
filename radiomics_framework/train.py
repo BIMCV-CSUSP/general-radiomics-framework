@@ -254,6 +254,7 @@ def build_fold_plan(
     n_repeats: int,
     random_state: int,
     feature_strategy: str,
+    fixed_feature_count: int | None,
     min_features: int,
     max_features_cap: int,
     samples_per_feature: int,
@@ -286,6 +287,7 @@ def build_fold_plan(
                     y_train=y[train_idx],
                     repeat_index=repeat,
                     fold_index=fold_index,
+                    fixed_feature_count=fixed_feature_count,
                     min_features=min_features,
                     max_features_cap=max_features_cap,
                     samples_per_feature=samples_per_feature,
@@ -713,6 +715,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--classification_threshold", type=float, default=0.5)
     parser.add_argument("--bootstrap_iterations", type=int, default=1000)
     parser.add_argument("--ci_level", type=float, default=0.95)
+    parser.add_argument(
+        "--fixed_feature_count",
+        type=int,
+        default=None,
+        help="If set, select exactly this many features per fold instead of using the adaptive cap.",
+    )
     parser.add_argument("--min_features", type=int, default=10)
     parser.add_argument("--max_features_cap", type=int, default=60)
     parser.add_argument("--samples_per_feature", type=int, default=25)
@@ -783,6 +791,7 @@ def run_training(args: argparse.Namespace) -> None:
         n_repeats=args.n_repeats,
         random_state=args.random_state,
         feature_strategy=args.feature_strategy,
+        fixed_feature_count=args.fixed_feature_count,
         min_features=args.min_features,
         max_features_cap=args.max_features_cap,
         samples_per_feature=args.samples_per_feature,
@@ -837,6 +846,8 @@ def run_training(args: argparse.Namespace) -> None:
         )
     with (output_dir / "label_mapping.json").open("w", encoding="utf-8") as file_handle:
         json.dump(label_mapping, file_handle, indent=2)
+    best_model = summary_df.iloc[0]["Classifier"]
+    logger.info("Best model by aggregated OOF AUC: %s", best_model)
     if not args.skip_report_plots:
         export_evaluation_plots(
             metrics_df,
@@ -844,11 +855,9 @@ def run_training(args: argparse.Namespace) -> None:
             summary_df,
             output_dir,
             threshold=args.classification_threshold,
+            best_model_name=best_model,
         )
         logger.info("Saved evaluation plots to %s", output_dir / "plots" / "evaluation")
-
-    best_model = summary_df.iloc[0]["Classifier"]
-    logger.info("Best model by aggregated OOF AUC: %s", best_model)
     if args.export_best_model or args.explain_best_model:
         best_payload = fit_export_model(
             X,
@@ -860,6 +869,7 @@ def run_training(args: argparse.Namespace) -> None:
             selection_args={
                 "min_features": args.min_features,
                 "max_features_cap": args.max_features_cap,
+                "fixed_feature_count": args.fixed_feature_count,
                 "samples_per_feature": args.samples_per_feature,
                 "minority_samples_per_feature": args.minority_samples_per_feature,
                 "fdr_alpha": args.fdr_alpha,
@@ -927,6 +937,7 @@ def run_training(args: argparse.Namespace) -> None:
             "models": args.models,
             "feature_strategy": args.feature_strategy,
             "classification_threshold": args.classification_threshold,
+            "fixed_feature_count": args.fixed_feature_count,
             "report_plots": not args.skip_report_plots,
             "best_model_exported": bool(args.export_best_model or args.explain_best_model),
             "shap_enabled": bool(args.explain_best_model),

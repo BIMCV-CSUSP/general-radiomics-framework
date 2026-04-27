@@ -95,6 +95,8 @@ python -m radiomics_framework.train \
   --fixed_feature_count 30 \
   --n_splits 5 \
   --n_repeats 10 \
+  --calibration_method sigmoid \
+  --calibration_cv_splits 3 \
   --bootstrap_iterations 1000 \
   --export_best_model \
   --explain_best_model
@@ -298,6 +300,10 @@ feature_selection/feature_selection_stability.csv
 feature_selection/feature_selection_stability.png
 feature_selection/feature_selection_group_stability.csv
 best_model.joblib
+best_model_oof_predictions_calibrated_flat.csv
+best_model_oof_predictions_calibrated_aggregated.csv
+best_model_reports/classification_report_before_calibration.csv
+best_model_reports/classification_report_after_calibration.csv
 ```
 
 `best_model.joblib` contains the fitted sklearn pipeline, the selected feature
@@ -344,6 +350,12 @@ images/<sample>__<modality>__<roi>.png
 Each PNG shows the raw image slice, the preprocessed slice, and the ROI mask
 overlay. The statistics CSV records spacing, size, intensity percentiles, and
 mask volume for auditability.
+
+The main summary metrics are computed from aggregated out-of-fold predictions
+across all folds and repeats, not from a single split. If you pass
+`--test_features`, the framework also writes external-test classification
+reports for the best model before and after calibration under
+`best_model_reports/external_test/`.
 
 ## Documentation
 

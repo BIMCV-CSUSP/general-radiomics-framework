@@ -801,3 +801,24 @@ def write_run_manifest(output_dir: Path, payload: dict) -> None:
 
     with (output_dir / "report_manifest.json").open("w", encoding="utf-8") as file_handle:
         json.dump(payload, file_handle, indent=2)
+
+
+def write_classification_report_files(
+    report: dict,
+    output_dir: Path,
+    *,
+    stem: str,
+) -> None:
+    """Write a sklearn classification report as JSON and CSV."""
+
+    ensure_directory(output_dir)
+    with (output_dir / f"{stem}.json").open("w", encoding="utf-8") as file_handle:
+        json.dump(report, file_handle, indent=2)
+
+    rows = []
+    for label, values in report.items():
+        if isinstance(values, dict):
+            row = {"label": label}
+            row.update(values)
+            rows.append(row)
+    pd.DataFrame(rows).to_csv(output_dir / f"{stem}.csv", index=False)

@@ -17,11 +17,13 @@ from sklearn.ensemble import (
 )
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.impute import SimpleImputer
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
     balanced_accuracy_score,
     cohen_kappa_score,
+    classification_report,
     confusion_matrix,
     f1_score,
     matthews_corrcoef,
@@ -57,6 +59,7 @@ from radiomics_framework.reports import (
     export_lime_interpretability,
     export_model_feature_importance,
     export_selected_feature_correlation,
+    write_classification_report_files,
     write_run_manifest,
 )
 
@@ -364,6 +367,42 @@ def maybe_tune_model(
     return search.best_estimator_
 
 
+def calibrate_fitted_model(
+    fitted_model,
+    X_train: pd.DataFrame,
+    y_train: np.ndarray,
+    groups_train: np.ndarray | None,
+    *,
+    calibration_method: str,
+    calibration_cv_splits: int,
+    random_state: int,
+) -> object:
+    """Fit a probability calibrator on top of an already tuned training-fold model."""
+
+    if groups_train is not None and len(np.unique(groups_train)) >= calibration_cv_splits:
+        splitter = StratifiedGroupKFold(
+            n_splits=calibration_cv_splits,
+            shuffle=True,
+            random_state=random_state,
+        )
+        cv = list(splitter.split(X_train, y_train, groups_train))
+    else:
+        splitter = StratifiedKFold(
+            n_splits=calibration_cv_splits,
+            shuffle=True,
+            random_state=random_state,
+        )
+        cv = list(splitter.split(X_train, y_train))
+
+    calibrator = CalibratedClassifierCV(
+        estimator=clone(fitted_model),
+        method=calibration_method,
+        cv=cv,
+    )
+    calibrator.fit(X_train, y_train)
+    return calibrator
+
+
 def evaluate_models(
     X: pd.DataFrame,
     y: np.ndarray,
@@ -464,6 +503,79 @@ def aggregate_oof_predictions(predictions_df: pd.DataFrame, *, threshold: float)
     )
     aggregated["predicted_label"] = (aggregated["prob_class_1"] >= threshold).astype(int)
     return aggregated
+
+
+def evaluate_best_model_calibrated(
+    X: pd.DataFrame,
+    y: np.ndarray,
+    sample_ids: np.ndarray,
+    groups: np.ndarray | None,
+    fold_plan: list[dict],
+    *,
+    model_name: str,
+    threshold: float,
+    tune: bool,
+    tune_n_iter: int,
+    tune_inner_splits: int,
+    calibration_method: str,
+    calibration_cv_splits: int,
+    random_state: int,
+    n_jobs: int,
+    logger: logging.Logger,
+) -> pd.DataFrame:
+    """Generate calibrated OOF predictions for the selected best model."""
+
+    base_model = get_models(random_state=random_state)[model_name]
+    prediction_rows: list[dict] = []
+    for fold in fold_plan:
+        selected_features = fold["selected_features"]
+        train_idx = fold["train_idx"]
+        val_idx = fold["val_idx"]
+        X_train = X.iloc[train_idx][selected_features]
+        X_val = X.iloc[val_idx][selected_features]
+        groups_train = groups[train_idx] if groups is not None else None
+        fitted = maybe_tune_model(
+            base_model,
+            model_name,
+            X_train,
+            y[train_idx],
+            groups_train,
+            tune=tune,
+            tune_n_iter=tune_n_iter,
+            tune_inner_splits=tune_inner_splits,
+            random_state=random_state,
+            n_jobs=n_jobs,
+        )
+        calibrated = calibrate_fitted_model(
+            fitted,
+            X_train,
+            y[train_idx],
+            groups_train,
+            calibration_method=calibration_method,
+            calibration_cv_splits=calibration_cv_splits,
+            random_state=random_state,
+        )
+        val_prob = predict_probability(calibrated, X_val)
+        for local_index, sample_id in enumerate(sample_ids[val_idx]):
+            prediction_rows.append(
+                {
+                    "Classifier": model_name,
+                    "Fold": fold["Fold"],
+                    "Repeat": fold["Repeat"],
+                    "sample_id": sample_id,
+                    "group_id": groups[val_idx][local_index] if groups is not None else sample_id,
+                    "true_label": int(y[val_idx][local_index]),
+                    "prob_class_1": float(val_prob[local_index]),
+                    "predicted_label": int(val_prob[local_index] >= threshold),
+                    "selected_features": json.dumps(selected_features),
+                }
+            )
+        logger.info(
+            "%s fold=%d | calibrated validation probabilities generated",
+            model_name,
+            fold["Fold"],
+        )
+    return pd.DataFrame(prediction_rows)
 
 
 def bootstrap_group_level_ci(
@@ -698,6 +810,105 @@ def export_shap_interpretability(
     logger.info("Saved SHAP interpretability outputs to %s", interpretability_dir)
 
 
+def build_best_model_classification_reports(
+    output_dir: Path,
+    *,
+    best_model_name: str,
+    threshold: float,
+    oof_uncalibrated_df: pd.DataFrame,
+    oof_calibrated_df: pd.DataFrame,
+) -> None:
+    """Write best-model per-class reports before and after calibration."""
+
+    report_dir = ensure_directory(output_dir / "best_model_reports")
+    for stem, source_df in [
+        ("classification_report_before_calibration", oof_uncalibrated_df),
+        ("classification_report_after_calibration", oof_calibrated_df),
+    ]:
+        classifier_df = source_df[source_df["Classifier"] == best_model_name].copy()
+        if classifier_df.empty:
+            continue
+        y_true = classifier_df["true_label"].to_numpy()
+        y_pred = (classifier_df["prob_class_1"].to_numpy() >= threshold).astype(int)
+        report = classification_report(
+            y_true,
+            y_pred,
+            labels=[0, 1],
+            target_names=["class_0", "class_1"],
+            output_dict=True,
+            zero_division=0,
+        )
+        write_classification_report_files(report, report_dir, stem=stem)
+
+
+def evaluate_external_test_set(
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    *,
+    best_model_name: str,
+    feature_strategy: str,
+    positive_label: str | None,
+    threshold: float,
+    selection_args: dict,
+    random_state: int,
+    calibration_method: str,
+    calibration_cv_splits: int,
+    output_dir: Path,
+) -> None:
+    """Fit the best model on all training data and evaluate on an external test set."""
+
+    required = {"sample_id", "label"}
+    missing = required - set(test_df.columns)
+    if missing:
+        raise ValueError(f"External test feature table is missing required columns: {sorted(missing)}")
+
+    train_y, _ = encode_binary_labels(train_df["label"].to_numpy(), positive_label)
+    test_y, _ = encode_binary_labels(test_df["label"].to_numpy(), positive_label)
+    metadata_columns = {"sample_id", "label", "group_id"}
+    X_train = prepare_numeric_feature_matrix(train_df, metadata_columns=metadata_columns)
+    X_test = prepare_numeric_feature_matrix(test_df, metadata_columns=metadata_columns)
+    if feature_strategy == "most_discriminant":
+        selected_features, selection_df, _ = select_radiomics_features(
+            X_train=X_train,
+            y_train=train_y,
+            repeat_index=None,
+            fold_index=None,
+            **selection_args,
+        )
+        selection_df.to_csv(output_dir / "external_test_selected_features.csv", index=False)
+    else:
+        selected_features = [column for column in X_train.columns if column in X_test.columns]
+
+    selected_features = [feature for feature in selected_features if feature in X_test.columns]
+    model = get_models(random_state=random_state)[best_model_name]
+    uncalibrated = clone(model).fit(X_train[selected_features], train_y)
+    calibrated = calibrate_fitted_model(
+        uncalibrated,
+        X_train[selected_features],
+        train_y,
+        train_df["group_id"].astype(str).to_numpy() if "group_id" in train_df.columns else None,
+        calibration_method=calibration_method,
+        calibration_cv_splits=calibration_cv_splits,
+        random_state=random_state,
+    )
+
+    test_report_dir = ensure_directory(output_dir / "best_model_reports" / "external_test")
+    for stem, fitted_model in [
+        ("classification_report_before_calibration", uncalibrated),
+        ("classification_report_after_calibration", calibrated),
+    ]:
+        y_pred = (predict_probability(fitted_model, X_test[selected_features]) >= threshold).astype(int)
+        report = classification_report(
+            test_y,
+            y_pred,
+            labels=[0, 1],
+            target_names=["class_0", "class_1"],
+            output_dict=True,
+            zero_division=0,
+        )
+        write_classification_report_files(report, test_report_dir, stem=stem)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train classical ML models from radiomics features.")
     parser.add_argument("--config", required=True, help="Project YAML configuration.")
@@ -733,6 +944,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tune_n_iter", type=int, default=20)
     parser.add_argument("--tune_inner_splits", type=int, default=3)
     parser.add_argument("--search_n_jobs", type=int, default=1)
+    parser.add_argument("--test_features", default=None, help="Optional external test feature CSV for final evaluation.")
+    parser.add_argument("--calibration_method", choices=["sigmoid", "isotonic"], default="sigmoid")
+    parser.add_argument("--calibration_cv_splits", type=int, default=3)
     parser.add_argument("--export_best_model", action="store_true")
     parser.add_argument(
         "--explain_best_model",
@@ -858,6 +1072,36 @@ def run_training(args: argparse.Namespace) -> None:
             best_model_name=best_model,
         )
         logger.info("Saved evaluation plots to %s", output_dir / "plots" / "evaluation")
+    calibrated_predictions_df = evaluate_best_model_calibrated(
+        X,
+        y,
+        sample_ids,
+        groups,
+        fold_plan,
+        model_name=best_model,
+        threshold=args.classification_threshold,
+        tune=args.tune,
+        tune_n_iter=args.tune_n_iter,
+        tune_inner_splits=args.tune_inner_splits,
+        calibration_method=args.calibration_method,
+        calibration_cv_splits=args.calibration_cv_splits,
+        random_state=args.random_state,
+        n_jobs=args.search_n_jobs,
+        logger=logger,
+    )
+    calibrated_aggregated_df = aggregate_oof_predictions(
+        calibrated_predictions_df,
+        threshold=args.classification_threshold,
+    )
+    calibrated_predictions_df.to_csv(output_dir / "best_model_oof_predictions_calibrated_flat.csv", index=False)
+    calibrated_aggregated_df.to_csv(output_dir / "best_model_oof_predictions_calibrated_aggregated.csv", index=False)
+    build_best_model_classification_reports(
+        output_dir,
+        best_model_name=best_model,
+        threshold=args.classification_threshold,
+        oof_uncalibrated_df=aggregated_df,
+        oof_calibrated_df=calibrated_aggregated_df,
+    )
     if args.export_best_model or args.explain_best_model:
         best_payload = fit_export_model(
             X,
@@ -930,6 +1174,34 @@ def run_training(args: argparse.Namespace) -> None:
                     random_state=args.random_state,
                     logger=logger,
                 )
+    if args.test_features:
+        test_path = Path(args.test_features)
+        if not test_path.is_absolute():
+            test_path = (config.root / test_path).resolve()
+        test_df = pd.read_csv(test_path)
+        evaluate_external_test_set(
+            df,
+            test_df,
+            best_model_name=best_model,
+            feature_strategy=args.feature_strategy,
+            positive_label=args.positive_label,
+            threshold=args.classification_threshold,
+            selection_args={
+                "fixed_feature_count": args.fixed_feature_count,
+                "min_features": args.min_features,
+                "max_features_cap": args.max_features_cap,
+                "samples_per_feature": args.samples_per_feature,
+                "minority_samples_per_feature": args.minority_samples_per_feature,
+                "fdr_alpha": args.fdr_alpha,
+                "correlation_threshold": args.correlation_threshold,
+                "n_jobs": args.selection_n_jobs,
+            },
+            random_state=args.random_state,
+            calibration_method=args.calibration_method,
+            calibration_cv_splits=args.calibration_cv_splits,
+            output_dir=output_dir,
+        )
+        logger.info("Saved external test evaluation reports")
     write_run_manifest(
         output_dir,
         {
@@ -939,6 +1211,9 @@ def run_training(args: argparse.Namespace) -> None:
             "classification_threshold": args.classification_threshold,
             "fixed_feature_count": args.fixed_feature_count,
             "report_plots": not args.skip_report_plots,
+            "test_features": args.test_features,
+            "calibration_method": args.calibration_method,
+            "calibration_cv_splits": args.calibration_cv_splits,
             "best_model_exported": bool(args.export_best_model or args.explain_best_model),
             "shap_enabled": bool(args.explain_best_model),
             "lime_enabled": bool(args.explain_best_model and not args.skip_lime),

@@ -1,17 +1,17 @@
 {
   "name": "t2",
   "image_column": "T2",
-  "n_sampled": 117,
-  "n_available": 117,
+  "n_sampled": 71,
+  "n_available": 71,
   "spacing_median_xyz": [
-    0.46875,
-    3.299997091293335,
-    0.46875
+    0.4861111044883728,
+    3.299999475479126,
+    0.4861111044883728
   ],
   "spacing_min_xyz": [
-    0.17579999566078186,
-    0.9999987483024597,
-    0.17579999566078186
+    0.2734379768371582,
+    1.6999967098236084,
+    0.2734380066394806
   ],
   "spacing_max_xyz": [
     0.8984000086784363,
@@ -19,20 +19,20 @@
     0.8984000086784363
   ],
   "size_median_xyz": [
-    384,
-    12,
-    384
+    320,
+    11,
+    320
   ],
   "is_anisotropic": true,
   "slice_axis_sitk": 1,
-  "intensity_p01": 55.0,
-  "intensity_p50": 472.0,
-  "intensity_p99": 1424.0,
+  "intensity_p01": 48.75804809570311,
+  "intensity_p50": 437.0,
+  "intensity_p99": 1387.0,
   "intensity_min": 0.0,
-  "intensity_max": 3622.2119140625,
-  "intensity_mean": 515.8211541780705,
-  "intensity_std": 284.37508923984683,
-  "range_p99_p01": 1369.0,
+  "intensity_max": 2996.216796875,
+  "intensity_mean": 505.64856133525006,
+  "intensity_std": 297.3504240432215,
+  "range_p99_p01": 1338.241951904297,
   "modality_kind": "mr",
   "used_mask": true
 }
